@@ -43,6 +43,75 @@ class MockSimControl:
     tendon_force: wp.array = None
 
 
+class RecordingActuator(Actuator):
+    """Actuator that records which step phases ran, for ordering tests."""
+
+    def __init__(self, input_indices, output_indices):
+        super().__init__(input_indices, output_indices)
+        self.calls = []
+
+    def is_stateful(self):
+        return True
+
+    def is_graphable(self):
+        return False
+
+    def has_transmission(self):
+        return True
+
+    def _run_controller(self, sim_state, sim_control, controller_output, output_indices, current_state, dt):
+        self.calls.append("controller")
+
+    def _run_state_manager(self, sim_state, sim_control, current_state, next_state, dt):
+        self.calls.append("state_manager")
+
+    def _run_transmission(self, actuation_forces, sim_control):
+        self.calls.append("transmission")
+
+
+class TestActuatorBase(unittest.TestCase):
+    """Tests for the Actuator base class."""
+
+    def setUp(self):
+        wp.init()
+
+    def test_init_rejects_mismatched_indices(self):
+        """output_indices length must match input_indices length."""
+        with self.assertRaises(ValueError):
+            Actuator(
+                input_indices=wp.array([0, 1], dtype=wp.uint32),
+                output_indices=wp.array([0], dtype=wp.uint32),
+            )
+
+    def test_step_runs_controller_state_manager_transmission_in_order(self):
+        """step() runs controller, then state manager, then transmission."""
+        num_dofs = 2
+        indices = wp.array([0, 1], dtype=wp.uint32)
+        actuator = RecordingActuator(input_indices=indices, output_indices=indices)
+        sim_state = MockSimState(
+            joint_q=wp.zeros(num_dofs, dtype=wp.float32),
+            joint_qd=wp.zeros(num_dofs, dtype=wp.float32),
+        )
+        sim_control = MockSimControl(
+            joint_target_pos=wp.zeros(num_dofs, dtype=wp.float32),
+            joint_target_vel=wp.zeros(num_dofs, dtype=wp.float32),
+            joint_act=wp.zeros(num_dofs, dtype=wp.float32),
+            joint_f=wp.zeros(num_dofs, dtype=wp.float32),
+        )
+
+        actuator.step(sim_state, sim_control, current_act_state=None, next_act_state=None, dt=0.01)
+        self.assertEqual(actuator.calls, ["controller", "state_manager", "transmission"])
+
+    def test_base_defaults_report_stateless_and_non_graphable_transmission(self):
+        """Base-class defaults are stateless and without transmission."""
+        indices = wp.array([0, 1], dtype=wp.uint32)
+        actuator = Actuator(input_indices=indices, output_indices=indices)
+        self.assertFalse(actuator.is_stateful())
+        self.assertTrue(actuator.is_graphable())
+        self.assertFalse(actuator.has_transmission())
+        self.assertIsNone(actuator.state())
+
+
 class TestActuatorPD(unittest.TestCase):
     """Tests for ActuatorPD."""
 
